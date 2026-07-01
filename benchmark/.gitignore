@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.llm_cache.json
+results_llm.json
