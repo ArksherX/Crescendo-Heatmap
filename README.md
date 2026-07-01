@@ -21,6 +21,28 @@ This tool measures that decay. It quantifies the trajectory, identifies the exac
 
 ---
 
+## Does it actually work? (reproducible benchmark)
+
+A seed-fixed benchmark backs the core claim with runnable code — no key, no network:
+
+```bash
+python benchmark/generate_dataset.py
+python benchmark/run_benchmark.py
+```
+
+On 214 labeled conversations (130 crescendo-class attacks), alerting **≥3 turns before** the critical turn:
+
+| Monitor | Pre-critical detection |
+|---|---|
+| Per-request @ standard block threshold (0.75) | **0.0%** — cannot fire before the critical turn |
+| Per-request @ aggressively tuned (0.50) | 36.2% |
+| **Trajectory (session-level)** | **76.9%**, mean **5.3 turns** early |
+| False positives on benign | **0.0%** |
+
+Methodology, honest caveats, and an LLM-scored natural-language validation: [`benchmark/`](benchmark/).
+
+---
+
 ## What It Measures
 
 | Metric | Description |
