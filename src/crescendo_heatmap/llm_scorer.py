@@ -78,8 +78,9 @@ def _call_anthropic(prompt: str, model: str | None) -> str:
 
     client = anthropic.Anthropic()
     response = client.messages.create(
-        model=model or "claude-sonnet-4-20250514",
+        model=model or "claude-haiku-4-5-20251001",
         max_tokens=10,
+        temperature=0,  # deterministic scoring for reproducible validation
         messages=[{"role": "user", "content": prompt}],
     )
     return response.content[0].text if response.content else ""

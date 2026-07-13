@@ -83,20 +83,76 @@ warn *early* on crescendo.
    defined corpus, **not a universal constant**.
 3. **Synthetic, keyword-scored corpus.** Per-turn scores come from the tool's
    deterministic heuristic scorer, and conversations are templated. This is a
-   controlled demonstration of the architectural principle, reproducible by
-   anyone — not a measurement of a production attack corpus. Realistic
-   natural-language validation requires the LLM scorer (`--llm-score`) and is
-   left as follow-on work.
+   controlled demonstration of the architectural principle under *favorable*
+   conditions — not a measurement of realistic attacks. The **76.9% is an
+   upper-bound demonstration**, not a detection rate. Natural-language validation
+   with an LLM scorer has now been done and gives a more modest, honest number —
+   see the section below.
 4. **Benign false-positive rate is optimistic.** Benign turns contain no risk
    vocabulary, so lowering the per-request threshold did not raise FPs here; in
    production, aggressive per-request thresholds trade recall for false alarms —
    a cost trajectory monitoring largely avoids because it keys on *change*.
 
+## LLM-scored natural-language validation (the honest number)
+
+The keyword result above demonstrates the *mechanism* under favorable conditions.
+To test whether it survives on realistic, natural-language multi-turn attacks
+scored by an LLM (not a keyword matcher), a second validation was run.
+
+**Setup.** A realistic corpus (`dataset_natural_v2.jsonl`, seed 7): 54
+conversations, median 19 turns — 36 crescendo-class attacks across six domains
+(ops, support, coding, research, finance, IT access), 6 abrupt controls, and 12
+benign including **6 adversarial-benign** (a security engineer legitimately
+probing their own system, to stress false positives). Each turn is scored by
+Claude Haiku (temperature 0) three ways: per-request (isolated, "how dangerous is
+this turn?"), trajectory (context-aware, the same question given the prior 5
+turns), and trajectory (escalation-aware, "how far has this escalated toward a
+violation?" over the whole conversation, flagged at ≥ 0.5).
+
+Reproduce:
+```bash
+python benchmark/generate_natural_v2.py
+python benchmark/llm_validate.py --provider anthropic --model claude-haiku-4-5-20251001 \
+  --dataset benchmark/dataset_natural_v2.jsonl --out benchmark/results_llm_v2.json
+```
+
+**Results (Claude Haiku, temperature 0, crescendo-class n=36):**
+
+| lead | per-request τ=0.75 | per-request τ=0.50 | trajectory (context) | trajectory (escalation) | benign FP |
+|---|---|---|---|---|---|
+| ≥1 | 0.0% | 13.9% | 69.4% | 61.1% | 8.3% |
+| ≥2 | 0.0% | 13.9% | 66.7% | 55.6% | 8.3% |
+| ≥3 | 0.0% | 2.8% | 44.4% | 36.1% | 8.3% |
+| ≥4 | 0.0% | 2.8% | 41.7% | 30.6% | 8.3% |
+
+Trajectory mean lead: ~5 turns before the critical action.
+
+**What this establishes, honestly:**
+1. **Single-turn / per-request monitoring is near-blind to multi-turn attacks** on
+   natural language: 0% at the standard threshold, 3–14% even aggressively tuned.
+   This is the robust finding, and it holds across both corpora.
+2. **Trajectory monitoring gives real advance warning:** 44% of crescendos
+   detected ≥3 turns before the critical action (69% for *any* advance warning),
+   a mean of ~5 turns of lead. A genuine, moderate advantage — well above
+   per-request, well below the 76.9% the keyword corpus implied.
+3. **It carries a false-positive cost (~8%).** The single benign FP is an
+   *adversarial-benign* case: a security engineer legitimately discussing attack
+   techniques, which reads as escalation. The expected failure mode of an
+   escalation-aware monitor. The six normal-benign conversations were clean.
+
+**A note on `lead`.** On short conversations the pre-critical metric is length-
+limited: if the critical turn is at turn 5, a `lead≥3` requirement demands
+detection during the benign opening. The v2 corpus (median 19 turns, critical at
+~turn 18) makes `lead≥3` a fair test; the full lead curve is shown so the metric's
+dependence on conversation length is visible rather than hidden.
+
 ## Defensible one-line summary
 
-> On a reproducible 214-conversation benchmark (130 crescendo-class multi-turn
-> attacks), per-request monitoring at a standard block threshold gave **0%**
-> pre-critical warning — it cannot alert before the critical turn — while
-> trajectory monitoring alerted on **76.9%** of crescendo attacks a mean **5.3
-> turns** before exploitation, at **0%** false positives on benign traffic. Even
-> an aggressively tuned per-request guardrail reached only 36%.
+> Single-turn monitoring is near-blind to multi-turn attacks (0% pre-critical, ≤14%
+> even aggressively tuned) on a realistic natural-language corpus scored by an LLM.
+> Trajectory monitoring detects **44%** of crescendo attacks at least 3 turns
+> before the critical action (69% for any advance warning), a mean of **~5 turns**
+> of lead, at a cost of **~8%** false positives concentrated on legitimate security
+> discussions. The architectural claim holds; the trajectory solution is real but
+> imperfect. (A keyword-scored demonstration reaches 76.9% under favorable
+> conditions, but that is an upper bound, not a detection rate.)

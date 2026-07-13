@@ -130,12 +130,63 @@ def build_pdf(md: str) -> None:
     HTML(string=html).write_pdf(str(PDF))
 
 
+TXT = ROOT / "WHITEPAPER.txt"
+
+
+def build_txt(md: str) -> None:
+    """Plain-text render (for upload systems that accept only .txt)."""
+    out: list[str] = []
+    lines = md.splitlines()
+    i = 0
+    _strip = lambda s: s.replace("**", "").replace("`", "")
+    while i < len(lines):
+        line = lines[i]
+
+        if line.strip().startswith("```"):
+            i += 1
+            while i < len(lines) and not lines[i].strip().startswith("```"):
+                out.append("    " + lines[i]); i += 1
+            i += 1
+            continue
+
+        # table: keep rows, drop the |---| separator, clean pipes
+        if line.lstrip().startswith("|") and i + 1 < len(lines) and re.match(r"\s*\|?[\s:-]+\|", lines[i + 1]):
+            header = [c.strip() for c in line.strip().strip("|").split("|")]
+            out.append("    " + "  |  ".join(_strip(c) for c in header))
+            i += 2
+            while i < len(lines) and lines[i].lstrip().startswith("|"):
+                row = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                out.append("    " + "  |  ".join(_strip(c) for c in row)); i += 1
+            continue
+
+        m = re.match(r"^(#{1,6})\s+(.*)", line)
+        if m:
+            level, txt = len(m.group(1)), _strip(m.group(2))
+            if level == 1:
+                out += ["", txt.upper(), "=" * len(txt)]
+            elif level == 2:
+                out += ["", txt, "-" * len(txt)]
+            else:
+                out += ["", txt]
+            i += 1
+            continue
+
+        if line.strip() == "---":
+            out.append("-" * 70); i += 1; continue
+
+        out.append(_strip(line)); i += 1
+
+    TXT.write_text("\n".join(out).strip() + "\n", encoding="utf-8")
+
+
 def main() -> None:
     md = MD.read_text(encoding="utf-8")
     build_docx(md)
     print(f"wrote {DOCX.name}")
     build_pdf(md)
     print(f"wrote {PDF.name}")
+    build_txt(md)
+    print(f"wrote {TXT.name}")
 
 
 if __name__ == "__main__":
