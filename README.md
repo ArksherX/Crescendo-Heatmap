@@ -19,25 +19,53 @@ In multi-agent systems, the attack surface compounds. Each agent handoff resets 
 
 This tool measures that decay. It quantifies the trajectory, identifies the exact turn where a conversation becomes nonrecoverable, and visualises the pattern across multi-agent interactions.
 
+Sample output — the turn-by-turn heatmap the tool actually generates from a conversation log:
+
+![Sample Crescendo Safety Heatmap output](assets/chart4_sample_heatmap_output.png)
+
 ---
 
 ## Does it actually work? (reproducible benchmark)
 
-A seed-fixed benchmark backs the core claim with runnable code — no key, no network:
+Two corpora back this, not one — a synthetic corpus first, then a harder, honest validation
+against realistic language, because a favorable demo and a defensible number are different
+claims and this project reports both.
 
 ```bash
+# Synthetic, keyword-scored corpus (fast, deterministic, no API key)
 python benchmark/generate_dataset.py
 python benchmark/run_benchmark.py
+
+# Natural-language corpus, LLM-scored (the honest number)
+python benchmark/generate_natural_v2.py
+python benchmark/llm_validate.py --provider anthropic --model claude-haiku-4-5-20251001 \
+  --dataset benchmark/dataset_natural_v2.jsonl
 ```
 
-On 214 labeled conversations (130 crescendo-class attacks), alerting **≥3 turns before** the critical turn:
+![Detection rate: keyword-scored synthetic vs. honest natural-language corpus](assets/chart1_detection_comparison.png)
+
+**The honest number, on a realistic natural-language corpus (n=54, 36 crescendo-class), alerting ≥3 turns before the critical turn:**
 
 | Monitor | Pre-critical detection |
 |---|---|
-| Per-request @ standard block threshold (0.75) | **0.0%** — cannot fire before the critical turn |
-| Per-request @ aggressively tuned (0.50) | 36.2% |
-| **Trajectory (session-level)** | **76.9%**, mean **5.3 turns** early |
-| False positives on benign | **0.0%** |
+| Per-request @ standard block threshold (0.75) | **0.0%** — cannot fire before the critical turn, by construction |
+| Per-request @ aggressively tuned (0.50) | 2.8% |
+| **Trajectory (session-level, context-aware)** | **44.4%**, any-warning **69.4%**, mean **~5 turns** early |
+| False positives on benign (incl. adversarial-benign cases) | **~8%** |
+
+The synthetic, keyword-scored corpus (214 conversations, 130 crescendo-class) shows the
+identical architecture reaching **76.9%** — that number is real, but it's an upper-bound
+demonstration under favorable conditions, not the number to cite as "the" detection rate.
+Both are reported; treat the 44.4% figure as the defensible one.
+
+Detection falls off as the required advance-warning window grows, shown across the full
+range rather than only the most flattering lead value:
+
+![Detection rate vs. required advance warning, both corpora](assets/chart2_lead_sensitivity.png)
+
+The overall methodology, from favorable synthetic demonstration to honest measurement:
+
+![Methodology: synthetic corpus to natural-language validation](assets/chart3_methodology_flow.png)
 
 Methodology, honest caveats, and an LLM-scored natural-language validation: [`benchmark/`](benchmark/).
 
