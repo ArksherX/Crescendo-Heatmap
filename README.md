@@ -25,6 +25,16 @@ Sample output — the turn-by-turn heatmap the tool actually generates from a co
 
 ---
 
+## Why This Matters for AI Safety
+
+This isn't just a tool for catching prompt injection — it's a measurement of a structural limitation in how AI agent behavior is currently overseen.
+
+As agents act with more autonomy over longer sessions — chaining tool calls, delegating to sub-agents, operating with less human-in-the-loop review — the safety-relevant question stops being "did this one output violate policy?" and becomes "has this system's behavior drifted from what was intended, and can anyone tell before consequences occur?" Per-request guardrails, by construction, can only answer the first question. A trajectory can drift toward an unsafe outcome without any single step in it crossing a policy boundary on its own — that's not a guardrail-tuning gap, it's the guardrail's unit of evaluation being wrong for the failure mode.
+
+This is a scalable-oversight problem: as the volume and autonomy of agent activity grows past what a human can review turn-by-turn, whether monitoring degrades gracefully or catastrophically depends on whether it evaluates trajectories, not just messages. This project measures, honestly, how much a trajectory-aware approach actually recovers versus a per-request one — including where it still fails — rather than assuming session-level monitoring closes the gap by default.
+
+---
+
 ## Does it actually work? (reproducible benchmark)
 
 Two corpora back this, not one — a synthetic corpus first, then a harder, honest validation
@@ -68,6 +78,22 @@ The overall methodology, from favorable synthetic demonstration to honest measur
 ![Methodology: synthetic corpus to natural-language validation](assets/chart3_methodology_flow.png)
 
 Methodology, honest caveats, and an LLM-scored natural-language validation: [`benchmark/`](benchmark/).
+
+---
+
+## Limitations
+
+- **Single LLM judge.** Natural-language scoring in this benchmark uses one model (Claude Haiku) as the judge. Judge-model bias is a real risk for any LLM-scored benchmark; cross-model validation (a second, independent judge, with both numbers reported regardless of which looks better) is planned but not yet complete.
+- **Moderate corpus size.** n=54 natural-language conversations (36 crescendo-class) is enough to be directionally credible, not enough to treat any single percentage as precise. Treat 44.4% as "roughly two-in-five, with several turns of lead time," not a number to cite to the decimal.
+- **Monotonic-drift gap between corpora.** The synthetic corpus's 76.9% and the natural-language corpus's 44.4% differ partly because synthetic conversations decay more predictably turn-over-turn; real adversarial language is noisier. That gap is itself a finding, not just a caveat to note in passing.
+- **Detection, not prevention.** This measures whether a trajectory-aware monitor can flag escalation before the critical turn — it does not implement an intervention, block, or circuit-breaker. Detection and enforcement are different problems.
+
+## Next Steps
+
+- Cross-model scorer comparison (a second LLM judge, pre-committed to reporting both models' numbers and their agreement rate, not just whichever looks better).
+- A proposed mitigation entry submitted to [MITRE ATLAS](https://atlas.mitre.org): no existing ATLAS mitigation currently addresses session/trajectory-level detection, only per-request evaluation.
+- Peer methodology comparison against independent researchers who converged on the same core problem from different angles.
+- Publishing corrected numbers across all public-facing material referencing this benchmark, so the honest figure is the only one in circulation.
 
 ---
 
