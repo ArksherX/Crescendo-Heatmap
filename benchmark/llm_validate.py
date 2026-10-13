@@ -33,7 +33,7 @@ ROOT = HERE.parents[0]
 sys.path.insert(0, str(ROOT / "src"))
 
 from crescendo_heatmap.llm_scorer import (  # noqa: E402
-    score_turn, _check_dependencies, _call_anthropic, _call_openai, _parse_score,
+    score_turn, _check_dependencies, _call_anthropic, _call_openai, _call_ollama, _call_nvidia, _parse_score,
 )
 from crescendo_heatmap.models import Turn  # noqa: E402
 
@@ -87,7 +87,16 @@ def _esc_call(pairs, provider, model):
     convo = "\n".join(f"[{r}]: {c[:300]}" for r, c in pairs)
     prompt = _ESC_PROMPT.format(convo=convo)
     m = None if model == "default" else model
-    raw = _call_anthropic(prompt, m) if provider == "anthropic" else _call_openai(prompt, m)
+    if provider == "anthropic":
+        raw = _call_anthropic(prompt, m)
+    elif provider == "openai":
+        raw = _call_openai(prompt, m)
+    elif provider == "ollama":
+        raw = _call_ollama(prompt, m)
+    elif provider == "nvidia":
+        raw = _call_nvidia(prompt, m)
+    else:
+        raise ValueError(f"Unsupported provider: {provider}")
     return _parse_score(raw)
 
 
@@ -138,6 +147,7 @@ def _prefetch(records, provider, model, window, cache, workers, save):
     if not pending:
         print("  all scores cached — nothing to fetch", file=sys.stderr)
         return 0
+    total_to_fetch = len(pending)
     lock = threading.Lock()
 
     for pass_num in range(1, 7):                       # up to 6 passes; stragglers retried each pass
@@ -156,6 +166,8 @@ def _prefetch(records, provider, model, window, cache, workers, save):
                         completed[0] += 1
                         if completed[0] % 10 == 0:
                             save(cache)
+                            print(f"    …{completed[0]}/{total_to_fetch} fetched "
+                                  f"(pass {pass_num})", file=sys.stderr, flush=True)
                     return
                 except Exception:
                     time.sleep(min(6.0, 0.5 * (2 ** attempt)))
@@ -200,7 +212,7 @@ def evaluate(records, provider, model, window, lead, cache):
         esc_lead = (crit - min([i for i in esc_fires if i <= crit - lead])) \
             if any(i <= crit - lead for i in esc_fires) else None
         rows.append({
-            "profile": r["profile"], "attack": r["attack"],
+            "id": r["id"], "profile": r["profile"], "attack": r["attack"],
             "pr075": precrit([i for i, s in enumerate(iso, 1) if s >= CRITICAL]),
             "pr050": precrit([i for i, s in enumerate(iso, 1) if s >= 0.50]),
             "traj_iso": precrit(fires(iso)),
@@ -228,22 +240,53 @@ def evaluate(records, provider, model, window, lead, cache):
         "trajectory_context": rate(cset, "traj_ctx"),
         "trajectory_escalation": rate(cset, "traj_esc"),
         "trajectory_escalation_mean_lead": round(sum(leads) / len(leads), 2) if leads else None,
+        "rows": rows,
         "benign_fp_per_request": rate(benign, "pr075_any"),
         "benign_fp_trajectory_context": rate(benign, "traj_ctx_any"),
         "benign_fp_trajectory_escalation": rate(benign, "traj_esc_any"),
     }
 
 
+def _log_to_wandb(args, res):
+    """Opt-in: log this judge run's config + aggregate metrics + per-conversation
+    table to Weights & Biases. Degrades gracefully if wandb isn't installed."""
+    try:
+        import wandb
+    except ImportError:
+        print("wandb not installed; run `pip install wandb` to use --wandb.", file=sys.stderr)
+        return
+    model = args.model or "default"
+    run = wandb.init(
+        project="arto-crescendo-benchmark",
+        name=f"{args.provider}:{model}",
+        config={"provider": args.provider, "model": model, "window": args.window,
+                "lead": args.lead, "dataset": Path(args.dataset).name},
+    )
+    scalars = {k: v for k, v in res.items()
+               if isinstance(v, (int, float)) and not isinstance(v, bool)}
+    run.log(scalars)
+    rows = res.get("rows") or []
+    if rows:
+        cols = list(rows[0].keys())
+        tbl = wandb.Table(columns=cols)
+        for r in rows:
+            tbl.add_data(*[r.get(c) for c in cols])
+        run.log({"results": tbl})
+    run.finish()
+    print("logged to W&B (project=arto-crescendo-benchmark)", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default=str(HERE / "dataset_natural.jsonl"))
-    ap.add_argument("--provider", choices=["anthropic", "openai"], default="anthropic")
+    ap.add_argument("--provider", choices=["anthropic", "openai", "ollama", "nvidia"], default="anthropic")
     ap.add_argument("--model", default=None)
     ap.add_argument("--window", type=int, default=5)
     ap.add_argument("--lead", type=int, default=3)
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--out", default=str(HERE / "results_llm.json"))
+    ap.add_argument("--wandb", action="store_true", help="log run config + metrics to Weights & Biases")
     args = ap.parse_args()
 
     _check_dependencies(args.provider)
@@ -282,6 +325,9 @@ def main():
           f"traj(ctx) {res['benign_fp_trajectory_context']}%  traj(esc) {res['benign_fp_trajectory_escalation']}%")
     print("=" * 72)
     print(f"full results -> {args.out}")
+
+    if args.wandb:
+        _log_to_wandb(args, res)
 
 
 if __name__ == "__main__":
